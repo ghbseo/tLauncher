@@ -1,20 +1,50 @@
 {
   "name": "tlauncher",
   "version": "0.1.0",
-  "description": "KRDS-based Electron launcher skeleton for Tomcat deployment workflows.",
+  "description": "Tomcat 기반 WAR 프로젝트의 빌드, 배포, 실행을 위한 데스크톱 런처",
   "main": "src/main/index.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron ."
+    "dev": "electron .",
+    "dist:win": "electron-builder --win zip"
   },
   "keywords": [
     "electron",
     "tomcat",
     "launcher"
   ],
-  "author": "",
+  "author": "ghbseo",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^36.0.0"
+    "debug": "^4.4.3",
+    "electron": "^36.0.0",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "com.ghbseo.tlauncher",
+    "productName": "tLauncher",
+    "copyright": "Copyright © 2026 ghbseo",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "tLauncher-${version}-win-${arch}.${ext}",
+      "icon": "assets/icon.ico",
+      "signAndEditExecutable": false,
+      "forceCodeSigning": false
+    }
   }
 }
