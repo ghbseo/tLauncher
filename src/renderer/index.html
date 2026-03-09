@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>tLauncher</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">본문 바로가기</a>
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="app-header__identity">
+          <p class="app-eyebrow">Tomcat Launcher</p>
+          <h1 class="app-title">배포 실행</h1>
+          <p class="app-subtitle">
+            프로젝트와 Tomcat 실행 환경을 관리합니다.
+          </p>
+        </div>
+        <div class="status-panel" aria-live="polite">
+          <span class="status-badge status-badge--idle" id="status-tone">준비됨</span>
+          <p class="status-copy" id="status-message">
+            실행 상태를 확인합니다.
+          </p>
+        </div>
+      </header>
+
+      <main class="workspace workspace--profiles" id="main-content">
+        <section class="panel panel--profiles" aria-labelledby="profile-heading">
+          <div class="panel__header panel__header--stacked">
+            <div>
+              <p class="section-kicker">Profiles</p>
+              <h2 class="panel__title" id="profile-heading">작업 대상</h2>
+            </div>
+            <p class="panel__description">
+              실행 환경을 저장하고 선택합니다.
+            </p>
+          </div>
+
+          <div class="action-bar action-bar--sidebar">
+            <button class="button button--secondary" id="new-profile-button" type="button">
+              새 프로필
+            </button>
+            <button class="button button--ghost" id="delete-profile-button" type="button">
+              삭제
+            </button>
+          </div>
+
+          <div class="profile-list" id="profile-list" role="listbox" aria-label="프로필 목록"></div>
+        </section>
+
+        <div class="workspace__content">
+          <section class="panel panel--form" aria-labelledby="workspace-heading">
+            <div class="panel__header panel__header--workspace">
+              <div>
+                <p class="section-kicker">Workspace</p>
+                <h2 class="panel__title" id="workspace-heading">실행 환경 입력</h2>
+                <p class="panel__description">
+                  선택한 프로필의 실행 정보와 설명을 관리합니다.
+                </p>
+              </div>
+
+              <div class="action-bar action-bar--workspace">
+                <button class="button button--primary" id="run-button" type="button">
+                  Run
+                </button>
+                <button class="button button--secondary" id="save-button" type="button">
+                  Save Profile
+                </button>
+                <button class="button button--tertiary" id="reload-button" type="button">
+                  설정 확인
+                </button>
+              </div>
+            </div>
+
+            <form class="form-grid">
+              <input type="hidden" name="profileId" value="" />
+
+              <section class="subpanel subpanel--compact subpanel--full">
+                <div class="subpanel__header">
+                  <div>
+                    <p class="section-kicker">Profile</p>
+                    <h3 class="subpanel__title">기본 정보</h3>
+                  </div>
+                </div>
+
+                <div class="subpanel__body subpanel__body--two-column">
+                  <label class="field">
+                    <span class="field__label">Profile Name</span>
+                    <input
+                      class="field__input"
+                      type="text"
+                      name="profileName"
+                      value=""
+                      spellcheck="false"
+                    />
+                    <span class="field__hint">목록에 표시할 이름</span>
+                  </label>
+
+                  <label class="field">
+                    <span class="field__label">Description</span>
+                    <input
+                      class="field__input"
+                      type="text"
+                      name="profileDescription"
+                      value=""
+                      spellcheck="false"
+                    />
+                    <span class="field__hint">프로필 용도나 구분 메모</span>
+                  </label>
+                </div>
+              </section>
+
+              <section class="subpanel subpanel--paths">
+                <div class="subpanel__header">
+                  <div>
+                    <p class="section-kicker">Paths</p>
+                    <h3 class="subpanel__title">경로 설정</h3>
+                  </div>
+                </div>
+
+                <div class="subpanel__body subpanel__body--two-column">
+                  <label class="field">
+                    <span class="field__label">Project Directory</span>
+                    <div class="field__control">
+                      <input
+                        class="field__input"
+                        type="text"
+                        name="projectDir"
+                        value=""
+                        spellcheck="false"
+                      />
+                      <button
+                        class="button button--picker"
+                        type="button"
+                        data-directory-picker="projectDir"
+                      >
+                        선택
+                      </button>
+                    </div>
+                    <span class="field__hint">Maven 또는 Gradle 프로젝트 루트 경로</span>
+                  </label>
+
+                  <label class="field">
+                    <span class="field__label">Tomcat Home</span>
+                    <div class="field__control">
+                      <input
+                        class="field__input"
+                        type="text"
+                        name="tomcatHome"
+                        value=""
+                        spellcheck="false"
+                      />
+                      <button
+                        class="button button--picker"
+                        type="button"
+                        data-directory-picker="tomcatHome"
+                      >
+                        선택
+                      </button>
+                    </div>
+                    <span class="field__hint">공용 바이너리와 실행 스크립트 위치</span>
+                  </label>
+
+                  <label class="field field--full">
+                    <span class="field__label">Tomcat Base</span>
+                    <div class="field__control">
+                      <input
+                        class="field__input"
+                        type="text"
+                        name="tomcatBase"
+                        value=""
+                        spellcheck="false"
+                      />
+                      <button
+                        class="button button--picker"
+                        type="button"
+                        data-directory-picker="tomcatBase"
+                      >
+                        선택
+                      </button>
+                    </div>
+                    <span class="field__hint">conf, gtapps, logs 등 환경별 운영 폴더</span>
+                  </label>
+
+                  <label class="field field--full">
+                    <span class="field__label">Maven Path</span>
+                    <div class="field__control">
+                      <input
+                        class="field__input"
+                        type="text"
+                        name="mavenPath"
+                        value=""
+                        spellcheck="false"
+                      />
+                      <button
+                        class="button button--picker"
+                        type="button"
+                        data-file-picker="mavenPath"
+                      >
+                        선택
+                      </button>
+                    </div>
+                    <span class="field__hint">mvn.cmd 파일 경로</span>
+                  </label>
+                </div>
+              </section>
+
+              <section class="subpanel subpanel--runtime">
+                <div class="subpanel__header">
+                  <div>
+                    <p class="section-kicker">Runtime</p>
+                    <h3 class="subpanel__title">실행 옵션</h3>
+                  </div>
+                </div>
+
+                <div class="subpanel__body">
+                  <label class="field">
+                    <span class="field__label">Build Command</span>
+                    <input
+                      class="field__input"
+                      type="text"
+                      name="buildCommand"
+                      value="clean package"
+                      spellcheck="false"
+                    />
+                    <span class="field__hint">mvn.cmd 뒤에 전달할 인자</span>
+                  </label>
+
+                  <label class="field">
+                    <span class="field__label">Tomcat Options</span>
+                    <input
+                      class="field__input"
+                      type="text"
+                      name="tomcatOptions"
+                      value="-Dfile.encoding=UTF-8"
+                      spellcheck="false"
+                    />
+                    <span class="field__hint">CATALINA_OPTS로 전달할 옵션</span>
+                  </label>
+                </div>
+              </section>
+            </form>
+          </section>
+
+          <section class="panel panel--logs" aria-labelledby="log-heading">
+            <div class="panel__header">
+              <div>
+                <p class="section-kicker">Runtime</p>
+                <h2 class="panel__title" id="log-heading">상태 및 로그</h2>
+              </div>
+              <div class="panel__actions">
+                <button class="button button--ghost" id="expand-log-button" type="button">
+                  전체 보기
+                </button>
+                <span class="status-badge status-badge--idle" id="version-pill">버전 확인 대기</span>
+              </div>
+            </div>
+            <div class="log-console" id="log-console" role="log" aria-live="polite">
+              <p>[INFO] 렌더러 초기화 중...</p>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div class="log-modal" id="log-modal" hidden>
+      <div class="log-modal__backdrop" id="log-modal-backdrop"></div>
+      <section
+        class="log-modal__dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="log-modal-title"
+      >
+        <div class="log-modal__header">
+          <div>
+            <p class="section-kicker">Runtime</p>
+            <h2 class="panel__title" id="log-modal-title">전체 로그</h2>
+          </div>
+          <div class="log-modal__actions">
+            <button class="button button--ghost" id="copy-log-button" type="button">
+              복사
+            </button>
+            <button class="button button--secondary" id="close-log-button" type="button">
+              닫기
+            </button>
+          </div>
+        </div>
+        <div class="log-console log-console--modal" id="log-console-modal" role="log" aria-live="polite"></div>
+      </section>
+    </div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
