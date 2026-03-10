@@ -79,6 +79,7 @@ function createWindow() {
     backgroundColor: "#f4f7fb",
     autoHideMenuBar: true,
     title: "tLauncher",
+    icon: path.join(__dirname, "../../assets/icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -162,8 +163,8 @@ ipcMain.handle("launcher:run", async (event, preparedRun) => {
   return executePreparedRun(event.sender, preparedRun);
 });
 
-ipcMain.handle("launcher:stop", async (event) => {
-  return stopRunForSender(event.sender);
+ipcMain.handle("launcher:stop", async (event, runId) => {
+  return stopRunForSender(event.sender, runId);
 });
 
 ipcMain.handle("dialog:selectDirectory", async (event, options = {}) => {

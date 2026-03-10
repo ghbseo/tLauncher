@@ -35,17 +35,87 @@ let profileStore = {
   profiles: []
 };
 let runLogUnsubscribe = null;
-let isRunning = false;
-const logLines = [];
+const activeRunsByProfile = new Map();
+const logLinesByProfile = new Map();
+
+function getSelectedProfileId() {
+  return formState.profileId || profileStore.currentProfileId || "";
+}
+
+function getLogBucketKey(profileId = getSelectedProfileId()) {
+  return profileId || "__global__";
+}
+
+function getLogLines(profileId = getSelectedProfileId()) {
+  const key = getLogBucketKey(profileId);
+  if (!logLinesByProfile.has(key)) {
+    logLinesByProfile.set(key, []);
+  }
+
+  return logLinesByProfile.get(key);
+}
+
+function renderLogConsole(profileId = getSelectedProfileId()) {
+  const lines = getLogLines(profileId);
+  logConsoleElement.innerHTML = "";
+  logConsoleModalElement.innerHTML = "";
+
+  lines.forEach((message) => {
+    const line = document.createElement("p");
+    line.textContent = message;
+    logConsoleElement.appendChild(line);
+
+    const modalLine = document.createElement("p");
+    modalLine.textContent = message;
+    logConsoleModalElement.appendChild(modalLine);
+  });
+
+  logConsoleElement.scrollTop = logConsoleElement.scrollHeight;
+  logConsoleModalElement.scrollTop = logConsoleModalElement.scrollHeight;
+}
+
+function isProfileRunning(profileId = getSelectedProfileId()) {
+  return Boolean(profileId) && activeRunsByProfile.has(profileId);
+}
 
 function updateRunButtonState() {
+  const isRunning = isProfileRunning();
   runButtonElement.textContent = isRunning ? "Stop" : "Run";
   runButtonElement.classList.toggle("button--danger", isRunning);
   runButtonElement.classList.toggle("button--primary", !isRunning);
 }
 
-function appendLog(message) {
-  logLines.push(message);
+function refreshActionState() {
+  const selectedProfileId = getSelectedProfileId();
+  const hasProfiles = profileStore.profiles.length > 0;
+  const selectedProfileRunning = isProfileRunning(selectedProfileId);
+
+  runButtonElement.disabled = false;
+  saveButtonElement.disabled = false;
+  reloadButtonElement.disabled = false;
+  newProfileButtonElement.disabled = false;
+  deleteProfileButtonElement.disabled = !hasProfiles || selectedProfileRunning;
+  expandLogButtonElement.disabled = false;
+  directoryPickerElements.forEach((buttonElement) => {
+    buttonElement.disabled = false;
+  });
+  filePickerElements.forEach((buttonElement) => {
+    buttonElement.disabled = false;
+  });
+  profileListElement.querySelectorAll(".profile-card").forEach((buttonElement) => {
+    buttonElement.disabled = false;
+  });
+
+  updateRunButtonState();
+}
+
+function appendLog(message, profileId = getSelectedProfileId()) {
+  const lines = getLogLines(profileId);
+  lines.push(message);
+
+  if (getLogBucketKey(profileId) !== getLogBucketKey()) {
+    return;
+  }
 
   const line = document.createElement("p");
   line.textContent = message;
@@ -64,10 +134,13 @@ function setStatus(tone, message) {
   statusMessageElement.textContent = message;
 }
 
-function clearLog() {
-  logConsoleElement.innerHTML = "";
-  logConsoleModalElement.innerHTML = "";
-  logLines.length = 0;
+function clearLog(profileId = getSelectedProfileId()) {
+  logLinesByProfile.set(getLogBucketKey(profileId), []);
+
+  if (getLogBucketKey(profileId) === getLogBucketKey()) {
+    logConsoleElement.innerHTML = "";
+    logConsoleModalElement.innerHTML = "";
+  }
 }
 
 function setVersionLabel(label) {
@@ -101,6 +174,7 @@ function renderProfileList() {
   }
 
   profileStore.profiles.forEach((profile) => {
+    const isRunning = isProfileRunning(profile.id);
     const buttonElement = document.createElement("button");
     buttonElement.type = "button";
     buttonElement.className = "profile-card";
@@ -110,9 +184,13 @@ function renderProfileList() {
       buttonElement.classList.add("is-active");
     }
 
+    if (isRunning) {
+      buttonElement.classList.add("is-running");
+    }
+
     const titleElement = document.createElement("p");
     titleElement.className = "profile-card__title";
-    titleElement.textContent = profile.name || "이름 없는 프로필";
+    titleElement.textContent = `${profile.name || "이름 없는 프로필"}${isRunning ? " [Running]" : ""}`;
 
     const descriptionElement = document.createElement("p");
     descriptionElement.className = "profile-card__description";
@@ -126,8 +204,6 @@ function renderProfileList() {
     buttonElement.addEventListener("click", () => handleSelectProfile(profile.id));
     profileListElement.appendChild(buttonElement);
   });
-
-  deleteProfileButtonElement.disabled = false;
 }
 
 function hydrateProfileState(store, currentProfile) {
@@ -153,6 +229,8 @@ function hydrateProfileState(store, currentProfile) {
   }
 
   renderProfileList();
+  renderLogConsole();
+  refreshActionState();
 }
 
 function bindFormInputs() {
@@ -183,26 +261,7 @@ function renderProfileListPreview() {
       : profile
   );
   renderProfileList();
-}
-
-function setBusyState(busy) {
-  isRunning = busy;
-  runButtonElement.disabled = false;
-  saveButtonElement.disabled = busy;
-  reloadButtonElement.disabled = busy;
-  newProfileButtonElement.disabled = busy;
-  deleteProfileButtonElement.disabled = busy || profileStore.profiles.length === 0;
-  expandLogButtonElement.disabled = false;
-  directoryPickerElements.forEach((buttonElement) => {
-    buttonElement.disabled = busy;
-  });
-  filePickerElements.forEach((buttonElement) => {
-    buttonElement.disabled = busy;
-  });
-  profileListElement.querySelectorAll(".profile-card").forEach((buttonElement) => {
-    buttonElement.disabled = busy;
-  });
-  updateRunButtonState();
+  refreshActionState();
 }
 
 function openLogModal() {
@@ -219,7 +278,7 @@ function closeLogModal() {
 
 async function copyLogs() {
   try {
-    await navigator.clipboard.writeText(logLines.join("\n"));
+    await navigator.clipboard.writeText(getLogLines().join("\n"));
     appendLog("[INFO] 로그를 클립보드에 복사했습니다.");
     setStatus("success", "로그를 복사했습니다.");
   } catch (error) {
@@ -383,7 +442,7 @@ async function handleCreateProfile() {
 }
 
 async function handleSelectProfile(profileId) {
-  if (!profileId || profileId === profileStore.currentProfileId || isRunning) {
+  if (!profileId || profileId === profileStore.currentProfileId) {
     return;
   }
 
@@ -392,8 +451,8 @@ async function handleSelectProfile(profileId) {
   try {
     const result = await window.launcherApi.selectProfile(profileId);
     hydrateProfileState(result?.store, result?.currentProfile);
-    appendLog(`[INFO] ${result?.currentProfile?.name || "프로필"} 선택`);
-    setStatus("idle", "프로필을 전환했습니다.");
+    appendLog(`[INFO] ${result?.currentProfile?.name || "프로필"} 선택`, profileId);
+    setStatus(isProfileRunning(profileId) ? "warning" : "idle", isProfileRunning(profileId) ? "선택한 프로필이 실행 중입니다." : "프로필을 전환했습니다.");
   } catch (error) {
     appendLog(`[ERROR] ${error.message}`);
     setStatus("error", "프로필을 전환하지 못했습니다.");
@@ -402,6 +461,12 @@ async function handleSelectProfile(profileId) {
 
 async function handleDeleteProfile() {
   if (!formState.profileId) {
+    return;
+  }
+
+  if (isProfileRunning(formState.profileId)) {
+    appendLog("[WARN] 실행 중인 프로필은 삭제할 수 없습니다.");
+    setStatus("warning", "실행 중인 프로필은 삭제할 수 없습니다.");
     return;
   }
 
@@ -457,56 +522,95 @@ async function handleInspectConfig() {
 }
 
 async function handleRun() {
-  if (isRunning) {
-    appendLog("[ACTION] Stop 버튼 클릭");
+  syncStateFromInputs();
+  const profileId = getSelectedProfileId();
+
+  if (!profileId) {
+    appendLog("[WARN] 먼저 프로필을 선택하거나 저장하세요.");
+    setStatus("warning", "프로필을 먼저 선택하세요.");
+    return;
+  }
+
+  const activeRun = activeRunsByProfile.get(profileId);
+  if (activeRun) {
+    if (!activeRun.runId) {
+      appendLog("[INFO] 실행 준비 중이라 잠시 후 중지할 수 있습니다.", profileId);
+      setStatus("warning", "실행 준비 중입니다.");
+      return;
+    }
+
+    appendLog("[ACTION] Stop 버튼 클릭", profileId);
 
     try {
-      const result = await window.launcherApi.stopRun();
-      appendLog(`[INFO] ${result.message}`);
+      const result = await window.launcherApi.stopRun(activeRun.runId);
+      appendLog(`[INFO] ${result.message}`, profileId);
       setStatus(result.ok ? "warning" : "error", result.message);
     } catch (error) {
-      appendLog(`[ERROR] ${error.message}`);
+      appendLog(`[ERROR] ${error.message}`, profileId);
       setStatus("error", "실행 중지 요청에 실패했습니다.");
     }
     return;
   }
 
-  syncStateFromInputs();
-  clearLog();
-  appendLog("[ACTION] Run 버튼 클릭");
-  setBusyState(true);
+  const runFormState = { ...formState };
+  clearLog(profileId);
+  appendLog("[ACTION] Run 버튼 클릭", profileId);
+  activeRunsByProfile.set(profileId, {
+    runId: "",
+    profileName: runFormState.profileName || profileId
+  });
+  renderProfileList();
+  refreshActionState();
   setStatus("warning", "실행 준비 중입니다.");
   setVersionLabel("실행 준비");
 
   try {
-    const preparedRun = await window.launcherApi.prepareRun(formState);
-    appendLog(`[INFO] BAT 생성: ${preparedRun.batPath}`);
-    appendLog(`[INFO] 로그 파일: ${preparedRun.logPath}`);
-    appendLog(`[INFO] 배포 위치: ${preparedRun.summary.deployDir}`);
-    appendLog(`[INFO] 배포 파일: ${preparedRun.summary.deployFileName}`);
+    const preparedRun = await window.launcherApi.prepareRun(runFormState);
+    activeRunsByProfile.set(profileId, {
+      runId: preparedRun.runId,
+      profileName: preparedRun.summary.profileName || runFormState.profileName || profileId
+    });
+    renderProfileList();
+    refreshActionState();
+
+    appendLog(`[INFO] BAT 생성: ${preparedRun.batPath}`, profileId);
+    appendLog(`[INFO] 로그 파일: ${preparedRun.logPath}`, profileId);
+    appendLog(`[INFO] 배포 위치: ${preparedRun.summary.deployDir}`, profileId);
+    appendLog(`[INFO] 배포 파일: ${preparedRun.summary.deployFileName}`, profileId);
 
     const runResult = await window.launcherApi.runPrepared(preparedRun);
-    appendLog(`[INFO] 종료 코드: ${runResult.exitCode}`);
-    appendLog(`[INFO] 단계: ${runResult.stage}`);
+    appendLog(`[INFO] 종료 코드: ${runResult.exitCode}`, profileId);
+    appendLog(`[INFO] 단계: ${runResult.stage}`, profileId);
 
     if (runResult.stopped) {
-      appendLog("[INFO] 실행이 중지되었습니다.");
-      setStatus("warning", "실행을 중지했습니다.");
-      setVersionLabel("실행 중지");
+      appendLog("[INFO] 실행이 중지되었습니다.", profileId);
+      if (getSelectedProfileId() === profileId) {
+        setStatus("warning", "실행을 중지했습니다.");
+        setVersionLabel("실행 중지");
+      }
     } else if (runResult.success) {
-      setStatus("success", "실행이 완료되었습니다.");
-      setVersionLabel("실행 완료");
-    } else {
+      if (getSelectedProfileId() === profileId) {
+        setStatus("success", "실행이 완료되었습니다.");
+        setVersionLabel("실행 완료");
+      }
+    } else if (getSelectedProfileId() === profileId) {
       setStatus("error", `${runResult.stage} 단계에서 실패했습니다.`);
       setVersionLabel("실행 실패");
     }
   } catch (error) {
     const details = error.message.split(/\r?\n/).filter(Boolean);
-    details.forEach((line) => appendLog(`[ERROR] ${line}`));
-    setStatus("error", "실행 준비에 실패했습니다.");
-    setVersionLabel("실행 실패");
+    details.forEach((line) => appendLog(`[ERROR] ${line}`, profileId));
+    if (getSelectedProfileId() === profileId) {
+      setStatus("error", "실행 준비에 실패했습니다.");
+      setVersionLabel("실행 실패");
+    }
   } finally {
-    setBusyState(false);
+    activeRunsByProfile.delete(profileId);
+    renderProfileList();
+    refreshActionState();
+    if (getSelectedProfileId() === profileId) {
+      renderLogConsole(profileId);
+    }
   }
 }
 
@@ -532,7 +636,7 @@ function bindActions() {
   });
 
   runLogUnsubscribe = window.launcherApi.onRunLog((payload) => {
-    appendLog(payload.line);
+    appendLog(payload.line, payload.profileId);
   });
 }
 

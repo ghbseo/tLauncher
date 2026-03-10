@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld("launcherApi", {
   inspectConfig: (formState) => ipcRenderer.invoke("config:inspect", formState),
   prepareRun: (formState) => ipcRenderer.invoke("launcher:prepareRun", formState),
   runPrepared: (preparedRun) => ipcRenderer.invoke("launcher:run", preparedRun),
-  stopRun: () => ipcRenderer.invoke("launcher:stop"),
+  stopRun: (runId) => ipcRenderer.invoke("launcher:stop", runId),
   onRunLog: (listener) => {
     const wrapped = (_event, payload) => listener(payload);
     ipcRenderer.on(RUN_LOG_EVENT, wrapped);

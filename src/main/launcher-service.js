@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { spawn } = require("child_process");
+const { execFileSync, spawn } = require("child_process");
 const { app } = require("electron");
 const { TextDecoder } = require("util");
 
@@ -485,18 +485,9 @@ function buildBatchScript(formState, tomcatRunnerFileName) {
     "  exit /b 24",
     ")",
     "",
-    'echo [STAGE] tomcat-start',
-    'set "CATALINA_HOME=%TOMCAT_HOME%"',
-    'set "CATALINA_BASE=%TOMCAT_BASE%"',
-    'set "CATALINA_OPTS=%TOMCAT_RUNTIME_OPTIONS%"',
-    `set "TOMCAT_RUNNER=%~dp0${tomcatRunnerName}"`,
-    'start "Tomcat" "%TOMCAT_RUNNER%"',
-    "if errorlevel 1 (",
-    "  echo [ERROR] Tomcat start failed.",
-    "  exit /b 25",
-    ")",
-    "",
-    "echo [INFO] Run completed.",
+    'echo [STAGE] ready-for-tomcat',
+    `echo [INFO] Tomcat runner: %~dp0${tomcatRunnerName}`,
+    "echo [INFO] Build and deploy completed.",
     "exit /b 0",
     ""
   ].join("\r\n");
@@ -511,18 +502,21 @@ function prepareRun(formState) {
   }
 
   ensureDir(getRunsDir());
-  cleanupRunArtifacts();
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const batPath = path.join(getRunsDir(), `run-${timestamp}.bat`);
-  const logPath = path.join(getRunsDir(), `run-${timestamp}.log`);
-  const tomcatRunnerFileName = `tomcat-runner-${timestamp}.bat`;
+  const runId = `run-${timestamp}-${Math.random().toString(36).slice(2, 8)}`;
+  const batPath = path.join(getRunsDir(), `${runId}.bat`);
+  const logPath = path.join(getRunsDir(), `${runId}.log`);
+  const tomcatRunnerFileName = `${runId}-tomcat.bat`;
   const tomcatRunnerPath = path.join(getRunsDir(), tomcatRunnerFileName);
   const script = buildBatchScript(validation.formState, tomcatRunnerFileName);
   const tomcatRunnerScript = [
     "@echo off",
     "setlocal",
     "chcp 65001 >nul",
+    `set "CATALINA_HOME=${escapeBatchValue(validation.formState.tomcatHome)}"`,
+    `set "CATALINA_BASE=${escapeBatchValue(validation.formState.tomcatBase)}"`,
+    `set "CATALINA_OPTS=${escapeBatchValue(normalizeTomcatOptions(`${validation.formState.tomcatOptions} -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8`))}"`,
     'call "%CATALINA_HOME%\\bin\\catalina.bat" run',
     "endlocal",
     ""
@@ -533,10 +527,14 @@ function prepareRun(formState) {
   fs.writeFileSync(tomcatRunnerPath, tomcatRunnerScript, "utf8");
 
   return {
+    runId,
+    profileId: validation.formState.profileId,
     batPath,
     logPath,
     tomcatRunnerPath,
     summary: {
+      profileId: validation.formState.profileId,
+      profileName: validation.formState.profileName,
       projectDir: validation.formState.projectDir,
       tomcatHome: validation.formState.tomcatHome,
       tomcatBase: validation.formState.tomcatBase,
@@ -549,24 +547,60 @@ function prepareRun(formState) {
   };
 }
 
-function emitRunLog(sender, line) {
+function emitRunLog(sender, line, metadata = {}) {
   if (!sender || sender.isDestroyed()) {
     return;
   }
 
   sender.send(LOG_EVENT, {
     line,
+    runId: metadata.runId || "",
+    profileId: metadata.profileId || "",
     timestamp: new Date().toISOString()
   });
 }
 
-function stopRunForSender(sender) {
+function escapePowerShellString(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+function launchTomcat(preparedRun) {
+  const env = {
+    ...process.env,
+    CATALINA_HOME: preparedRun.summary.tomcatHome,
+    CATALINA_BASE: preparedRun.summary.tomcatBase,
+    CATALINA_OPTS: normalizeTomcatOptions(
+      `${preparedRun.summary.tomcatOptions} -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8`
+    )
+  };
+  const runnerPath = escapePowerShellString(preparedRun.tomcatRunnerPath);
+  const workingDir = escapePowerShellString(path.dirname(preparedRun.tomcatRunnerPath));
+  const command = `$proc = Start-Process -FilePath '${runnerPath}' -WorkingDirectory '${workingDir}' -PassThru; [Console]::Out.Write($proc.Id)`;
+  const output = execFileSync("powershell.exe", ["-NoProfile", "-Command", command], {
+    windowsHide: true,
+    encoding: "utf8",
+    env
+  });
+
+  const pid = Number.parseInt(String(output || "").trim(), 10);
+  return Number.isFinite(pid) ? pid : null;
+}
+
+function stopRunForSender(sender, runId) {
   if (!sender || sender.isDestroyed()) {
     return { ok: false, message: "실행 중인 작업이 없습니다." };
   }
 
-  const runState = activeRuns.get(sender.id);
-  if (!runState || !runState.child || runState.child.exitCode !== null || runState.stopping) {
+  const normalizedRunId = String(runId || "").trim();
+  const runState = activeRuns.get(normalizedRunId);
+  if (
+    !normalizedRunId ||
+    !runState ||
+    runState.senderId !== sender.id ||
+    !runState.child ||
+    runState.child.exitCode !== null ||
+    runState.stopping
+  ) {
     return { ok: false, message: "실행 중인 작업이 없습니다." };
   }
 
@@ -592,17 +626,24 @@ function executePreparedRun(sender, preparedRun) {
     let lastStage = "validation";
     const cleanupCurrentRunArtifacts = () => {
       safeUnlink(preparedRun.batPath);
-      safeUnlink(preparedRun.tomcatRunnerPath);
-      cleanupRunArtifacts({ keepLogPath: preparedRun.logPath });
     };
+    const emitPreparedRunLog = (line) =>
+      emitRunLog(sender, line, {
+        runId: preparedRun.runId,
+        profileId: preparedRun.profileId
+      });
     const writeStream = fs.createWriteStream(preparedRun.logPath, { flags: "a" });
     const child = spawn("cmd.exe", ["/d", "/s", "/c", preparedRun.batPath], {
       windowsHide: true
     });
-    activeRuns.set(sender.id, {
+
+    activeRuns.set(preparedRun.runId, {
       child,
+      senderId: sender.id,
+      profileId: preparedRun.profileId,
       stopping: false
     });
+
     const streamStates = {
       stdout: {
         encoding: "utf-8",
@@ -643,7 +684,7 @@ function executePreparedRun(sender, preparedRun) {
             }
           }
 
-          emitRunLog(sender, line);
+          emitPreparedRunLog(line);
         });
     };
 
@@ -665,7 +706,7 @@ function executePreparedRun(sender, preparedRun) {
 
         const line = state.buffer.trimEnd();
         if (line) {
-          emitRunLog(sender, line);
+          emitPreparedRunLog(line);
         }
 
         state.buffer = "";
@@ -678,9 +719,9 @@ function executePreparedRun(sender, preparedRun) {
     child.on("error", (error) => {
       const line = `[ERROR] ${error.message}`;
       writeStream.write(`${line}\r\n`);
-      emitRunLog(sender, line);
+      emitPreparedRunLog(line);
       writeStream.end(() => {
-        activeRuns.delete(sender.id);
+        activeRuns.delete(preparedRun.runId);
         cleanupCurrentRunArtifacts();
         resolve({
           success: false,
@@ -688,7 +729,10 @@ function executePreparedRun(sender, preparedRun) {
           exitCode: -1,
           batPath: preparedRun.batPath,
           logPath: preparedRun.logPath,
-          message: error.message
+          message: error.message,
+          runId: preparedRun.runId,
+          profileId: preparedRun.profileId,
+          stopped: false
         });
       });
     });
@@ -696,9 +740,46 @@ function executePreparedRun(sender, preparedRun) {
     child.on("close", (code) => {
       flushRemaining();
       writeStream.end(() => {
-        const runState = activeRuns.get(sender.id);
+        const runState = activeRuns.get(preparedRun.runId);
         const stopped = Boolean(runState?.stopping);
-        activeRuns.delete(sender.id);
+        activeRuns.delete(preparedRun.runId);
+
+        if (code === 0 && !stopped) {
+          try {
+            emitPreparedRunLog("[STAGE] tomcat-start");
+            const launchPid = launchTomcat(preparedRun);
+            emitPreparedRunLog(`[INFO] Tomcat launch requested. PID=${launchPid}`);
+            cleanupCurrentRunArtifacts();
+            resolve({
+              success: true,
+              stage: "tomcat-start",
+              exitCode: 0,
+              batPath: preparedRun.batPath,
+              logPath: preparedRun.logPath,
+              message: "Run completed.",
+              stopped: false,
+              runId: preparedRun.runId,
+              profileId: preparedRun.profileId
+            });
+            return;
+          } catch (error) {
+            emitPreparedRunLog(`[ERROR] Tomcat start failed: ${error.message}`);
+            cleanupCurrentRunArtifacts();
+            resolve({
+              success: false,
+              stage: "tomcat-start",
+              exitCode: -1,
+              batPath: preparedRun.batPath,
+              logPath: preparedRun.logPath,
+              message: error.message,
+              stopped: false,
+              runId: preparedRun.runId,
+              profileId: preparedRun.profileId
+            });
+            return;
+          }
+        }
+
         cleanupCurrentRunArtifacts();
         resolve({
           success: code === 0 && !stopped,
@@ -711,13 +792,14 @@ function executePreparedRun(sender, preparedRun) {
             : code === 0
               ? "Run completed."
               : `Run failed at ${lastStage}.`,
-          stopped
+          stopped,
+          runId: preparedRun.runId,
+          profileId: preparedRun.profileId
         });
       });
     });
   });
 }
-
 module.exports = {
   LOG_EVENT,
   getDefaultFormState,
@@ -732,3 +814,8 @@ module.exports = {
   executePreparedRun,
   stopRunForSender
 };
+
+
+
+
+
